@@ -1,0 +1,60 @@
+!pip install --upgrade tensorflow==2.8.0
+!pip install --upgrade numpy==1.21.6
+
+import os
+import pandas as pd
+import numpy as np # numpy version이 1.20.2라서 에러 뜸 --> 1.19.2로 downgrading
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
+import tensorflow as tf
+from keras import backend as K
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+
+
+
+path = 'C:/Users/YYJ/Desktop/MobiAct_Dataset_v2.0/Annotated Data/'
+
+scenario_list = os.listdir(path)
+
+print ("Scenario list: {}".format(scenario_list))
+
+file_list = []
+file_number = {}
+for scenario in scenario_list:
+    tmp_file_list = os.listdir(path+'/'+scenario)
+    i = 0
+    # 낙상이 아닌 파일이 많아서 정상 데이터는 일부만 사용 
+    for tmp_file in tmp_file_list:
+        if scenario in ['FOL', 'FKL', 'BSC', 'SDL']:
+            i += 1
+            file_list.append(os.path.abspath(path+'/'+scenario+'/'+tmp_file))
+        elif scenario == 'STD' and i > 1:
+            print(f'Pass [{tmp_file}] file')
+        elif scenario == 'WAL' and i > 1:
+            print(f'Pass [{tmp_file}] file')
+        elif scenario == 'SIT' and i > 1:
+            print(f'Pass [{tmp_file}] file')
+        elif i > 9:
+            print(f'Pass [{tmp_file}] file')
+        else:
+            i += 1
+            file_list.append(os.path.abspath(path+'/'+scenario+'/'+tmp_file))
+    file_number[scenario] = i
+
+print(f'Number of files: {file_number}')
+
+all_data = []
+data = []
+for i, file_dir in enumerate(file_list):
+    if i>300:
+        break
+    df = pd.read_csv(file_dir)
+    all_data.append(df[['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z', 'label']])
+data = pd.concat(all_data, axis=0)
+
+print(f'Total length of data: {len(data)}')
+
+
+
