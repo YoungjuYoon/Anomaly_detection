@@ -1,0 +1,250 @@
+x = np.array(x)
+y_multi = np.array(y_binary)
+y_binary = np.array(y_binary)
+
+
+history_points = 10  # input window size
+pred_window=[]
+for p_wind in range(1, 6): # predict window
+  for t_point in range(1, 6-p_wind+1):  # target point
+    # (pred window, target point)
+    pred_window.append((p_wind, t_point))
+
+# 앞서 설정해준 데이터에 맞게 데이터 생성
+x_window = []  # x 데이터 저장 변수
+y_window = [[] for _ in pred_window]  # y 데이터 저장 변수
+y_feat = y_multi.shape[-1]
+y_binary_1_11 = []
+
+max_predict_window, max_target_point = max(i[0] for i in pred_window), max(i[1] for i in pred_window)
+
+
+for i in range(len(x)-(history_points + max_predict_window+(max_target_point-1))):
+  x_window.append(x[i:i+history_points])
+
+  for y_idx, (p_wind, t_point) in enumerate(pred_window):
+
+    y_start = i+history_points+(t_point-1)  # y 시작점: i + input window + target point
+    y_end = i+history_points+(t_point-1)+p_wind  # y 끝점: i + input window + target point + output window
+    y_window[y_idx].append(y_multi[y_start:y_end, :].reshape([-1, p_wind, y_feat]))  
+
+  if sum(y_binary[i:i+history_points]) >= history_points*0.1:
+    y_binary_1_11.append([1])
+  else:
+    y_binary_1_11.append([0])
+
+x_window = np.array(x_window)
+y_window = [np.concatenate(y, axis=0) for y in y_window]
+y_binary_1_11 = np.array(y_binary_1_11)
+
+print(f'Number of fall labels(window): {sum(y_binary_1_11)}')
+
+print(x_window.shape)
+print(y_window[0].shape)
+
+# 만들어진 데이터 window check
+# (총 데이터 수, window size, feature)
+print('x window shape: ', x_window.shape)
+for y_idx, y in enumerate(y_window):
+  print('y%d window shape: '%y_idx, y.shape)
+
+print('y binary shape: ', y_binary_1_11.shape)
+
+from google.protobuf import reflection
+def LSTM_ORIGINAL(layer_num, history_points, x_train, y_train):
+  out_step = y_train.shape[-2]
+  out_y_val = y_train.shape[-1]
+
+  inp = tf.keras.layers.Input(shape= (history_points, x_train.shape[2]))
+  x = LSTM(layer_num, return_sequences=True, input_shape=(history_points, x_train.shape[2]))(inp)
+  x = LSTM(layer_num, input_shape=(history_points, layer_num))(x)
+  x = Dense(out_step*out_y_val)(x)
+  x = tf.keras.layers.Reshape([out_step, out_y_val])(x)
+  x = tf.keras.layers.Activation('sigmoid')(x)
+
+  model = tf.keras.models.Model(inp, x)
+
+  return model
+
+# LSTM_AE
+def LSTM_AE(layer_num, history_points, x_train, y_train):
+  out_step = y_train.shape[-2]
+  out_y_val = y_train.shape[-1]
+  
+  input_x = tf.keras.layers.Input(shape= (history_points, x_train.shape[2])) 
+  encoder = tf.keras.layers.LSTM(units=layer_num, 
+                                 input_shape=(history_points, x_train.shape[2]))(input_x)
+  encoder = tf.keras.layers.Dropout(rate=0.2)(encoder)
+
+  decoder = tf.keras.layers.RepeatVector(n=history_points)(encoder)
+  decoder = tf.keras.layers.LSTM(units=layer_num, return_sequences=True)(decoder)
+  decoder = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(units=x_train.shape[2]))(decoder)
+  
+  y_out = Dense(history_points*x_train.shape[2], activation='relu')(encoder)
+  y_out = Dense(out_step*out_y_val)(y_out)
+  y_out = tf.keras.layers.Reshape([out_step, out_y_val])(y_out)
+  y_out = tf.keras.layers.Activation('sigmoid')(y_out)
+
+  def ae_loss(input_x, decoder):
+
+      recon = K.mean(K.square(input_x - decoder))
+
+      return recon
+
+  m = tf.keras.models.Model(input_x, y_out)
+  
+  m.add_loss(ae_loss(input_x, decoder))
+  return m
+
+# LSTM_CNN
+def LSTM_CNN(layer_num, history_points, x_train, y_train):
+  out_step = y_train.shape[-2]
+  out_y_val = y_train.shape[-1]
+  inp = tf.keras.layers.Input(shape= (history_points, x_train.shape[2]))
+  x = tf.keras.layers.Conv1D(history_points*2, 3, padding='same',activation='relu',input_shape=x_train.shape[1:])(inp)
+  x = tf.keras.layers.Conv1D(history_points*2, 3, padding='same',activation='relu')(x)
+  x = tf.keras.layers.Conv1D(history_points, 3, padding='same',activation='relu')(x)
+  x = LSTM(layer_num, return_sequences=True, input_shape=(history_points, x_train.shape[2]))(x)
+  x = LSTM(layer_num, input_shape=(history_points, layer_num))(x)
+  x = Dense(out_step*out_y_val)(x)
+  x = tf.keras.layers.Reshape([out_step, out_y_val])(x)
+  x = tf.keras.layers.Activation('sigmoid')(x)
+
+  model = tf.keras.models.Model(inp, x)
+  return model
+
+# LSTM_VAE
+def LSTM_VAE(layer_num, history_points, x_train, y_train):
+  # encoder
+  out_step = y_train.shape[-2]
+  out_y_val = y_train.shape[-1]
+  latent_dim = 1
+  inter_dim = layer_num
+  timesteps, features = history_points, x_train.shape[2]
+
+  def sampling(args):
+      z_mean, z_log_sigma = args
+      batch_size = tf.shape(z_mean)[0] # <================
+      epsilon = K.random_normal(shape=(batch_size, latent_dim), mean=0., stddev=1.)
+      return z_mean + z_log_sigma * epsilon
+
+  # timesteps, features
+  input_x = tf.keras.layers.Input(shape= (timesteps, features)) 
+
+  #intermediate dimension 
+  h = tf.keras.layers.LSTM(inter_dim, activation='relu')(input_x)
+
+  #z_layer
+  z_mean = tf.keras.layers.Dense(latent_dim)(h)
+  z_log_sigma = tf.keras.layers.Dense(latent_dim)(h)
+  z = tf.keras.layers.Lambda(sampling)([z_mean, z_log_sigma])
+
+  # Reconstruction decoder
+  decoder1 = tf.keras.layers.RepeatVector(timesteps)(z)
+  decoder1 = tf.keras.layers.LSTM(inter_dim, activation='relu', return_sequences=True)(decoder1)
+  decoder1 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(features))(decoder1)
+
+  y_out = tf.keras.layers.Reshape([history_points*features])(decoder1)
+  y_out = Dense(history_points*features, activation='relu')(y_out)
+  y_out = Dense(out_step*out_y_val)(y_out)
+  y_out = tf.keras.layers.Reshape([out_step, out_y_val])(y_out)
+  y_out = tf.keras.layers.Activation('sigmoid')(y_out)
+
+  def vae_loss2(input_x, decoder1, z_log_sigma, z_mean):
+      """ Calculate loss = reconstruction loss + KL loss for each data in minibatch """
+      # E[log P(X|z)]
+      recon = K.mean(K.square(input_x - decoder1))
+      # D_KL(Q(z|X) || P(z|X)); calculate in closed form as both dist. are Gaussian
+      kl = 0.5 * K.mean(K.exp(z_log_sigma) + K.square(z_mean) - 1. - z_log_sigma)
+
+      return recon + kl
+
+  m = tf.keras.models.Model(input_x, y_out)
+  m.add_loss(vae_loss2(input_x, decoder1, z_log_sigma, z_mean))
+  return m
+  
+  
+  
+  
+num_ensemble = len(y_window)
+
+model_name = 'LSTM_ORIGINAL'  # 'LSTM_AE', 'LSTM_VAE', 'LSTM_CNN', 'LSTM_ORIGINAL'
+lstm_model = eval(model_name)
+
+# network hyperparameter
+layer_num = 10
+batch_size = 128
+epoch = 3
+mse = tf.keras.losses.MeanSquaredError()  # loss
+
+lstm_models, lstm_models_best, logistic_models = [], [], []
+train_logistic_outputs, test_logistic_outputs = [], []
+accuracy_set = []
+
+# for문을 활용하여 여러개의 lstm 모델 학습
+for ensemble_idx in range(num_ensemble):
+
+  print("input window: %d, predict window:%d, target point: %d"%(history_points, pred_window[ensemble_idx][0], pred_window[ensemble_idx][1]))
+
+  x_train, x_test, y_train, y_test = train_test_split(x_window, y_window[ensemble_idx], test_size=0.3)  # train test split
+  x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.3)  # validation split
+  
+  y_train = np.asarray(y_train).astype('float32')
+  y_val = np.asarray(y_val).astype('float32')
+
+  model = lstm_model(layer_num, history_points, x_train, y_train)
+  
+  model.compile(loss=mse, optimizer='adam', metrics=['accuracy'])
+  history=model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epoch, shuffle=False, validation_data=[x_val, y_val])
+
+  lstm_models.append(model)  # 학습된 lstm 모델 저장
+  accuracy_set.append(history.history['val_accuracy'][-1])  # validation accuray 기록
+  
+  
+num_select_model=12  # 전체 학습된 모델중에서 선택하고 싶은 모델 개수
+
+# accuracy가 높은 순서대로 top down
+model_list = np.argsort(accuracy_set)[::-1]
+lstm_train_output, lstm_test_output = [], []
+for model_idx in model_list[:num_select_model]:
+  print("selected model%d: predict window: %d, target point: %d, val accuracy: %2.2f"%(model_idx, pred_window[model_idx][0], pred_window[model_idx][1], accuracy_set[model_idx]))
+  x_train, x_test, y_train, y_test = train_test_split(x_window, y_window[model_idx], test_size=0.3, random_state = 777)
+  
+  model = lstm_models[model_idx]  
+  lstm_models_best.append(model) 
+
+  train_output = model.predict(x_train)
+  data_num, time_step, feat = train_output.shape 
+  train_output = train_output.reshape([data_num, time_step*feat]) # output이 (n_samples, n_features) 가 되도록 reshape
+
+  lstm_train_output.append(train_output)
+
+  test_output = model.predict(x_test)
+  data_num, time_step, feat = test_output.shape
+  test_output = test_output.reshape([data_num, time_step*feat])
+
+  lstm_test_output.append(test_output)
+
+else:
+  lstm_train_output = np.concatenate(lstm_train_output, axis=-1)
+  lstm_test_output = np.concatenate(lstm_test_output, axis=-1)
+  
+x_train11, x_test11, y_train11, y_test11 = train_test_split(x_window, y_binary_1_11, test_size=0.3, random_state = 777)  #낙상 여부
+# stacking 앙상블을 구현해주는 decision tree 학습
+from sklearn import tree
+decision_tree = tree.DecisionTreeClassifier()
+decision_tree.fit(lstm_train_output, y_train11)  # decision tree 학습
+
+
+# 학습된 decision tree에 대해서 테스트 진행
+y_pred11 = decision_tree.predict(lstm_test_output)
+
+# test 데이터에 대해 정확도 확인
+cf = confusion_matrix(y_test11, y_pred11)
+print('Confusion matrix')
+print(cf)
+print('Accuracy:', accuracy_score(y_test11, y_pred11))
+print('Precision:', precision_score(y_test11, y_pred11))
+print('Recall:', recall_score(y_test11, y_pred11))
+print('F1 score:', f1_score(y_test11, y_pred11))
+
