@@ -1,0 +1,43 @@
+!pip install --upgrade tensorflow==2.8.0
+!pip install --upgrade numpy==1.21.6
+
+import os
+import pandas as pd
+import numpy as np 
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
+import tensorflow as tf
+from keras import backend as K
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+
+data_path = 'C:/Users/YYJ/Downloads'  
+
+signal = pd.read_csv(os.path.join(data_path, 'SWaT_Dataset_Attack_v0.csv'))
+
+print(signal.columns.values)
+
+
+used_column = ['FIT101', 'LIT101', ' MV101', 'P101', 'P102', ' AIT201', 'AIT202',
+ 'AIT203', 'FIT201', ' MV201', ' P201', ' P202', 'P203', ' P204', 'P205', 'P206',
+ 'DPIT301', 'FIT301', 'LIT301', 'MV301', 'MV302', ' MV303', 'MV304', 'P301',
+ 'P302', 'AIT401', 'AIT402', 'FIT401', 'LIT401', 'P401', 'P402', 'P403', 'P404',
+ 'UV401', 'AIT501', 'AIT502','AIT503', 'AIT504', 'FIT501', 'FIT502', 'FIT503',
+ 'FIT504', 'P501', 'P502', 'PIT501', 'PIT502', 'PIT503', 'FIT601', 'P601', 'P602',
+ 'P603']  
+print('Number of selected column: %d'%len(used_column))
+print('column names: ', used_column)
+
+x = signal[used_column]
+y_binary = signal.copy()
+y_binary.loc[y_binary['Normal/Attack'].isin(['Normal'])] = 0
+y_binary.loc[y_binary['Normal/Attack'].isin(['Attack'])] = 1
+y_binary = y_binary['Normal/Attack']
+
+
+print(f'x shape: {x.shape}')
+print(f'y shape: {y_binary.shape}')
+
+print(f'Number of fall labels: {sum(np.array(y_binary) == 1)}')
+print(f'Number of not fall labels: {sum(np.array(y_binary) == 0)}')
