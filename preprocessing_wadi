@@ -25,3 +25,4 @@ print(f'y shape: {y_binary.shape}')
 
 print(f'Number of fall labels: {sum(np.array(y_binary) == 1)}')
 print(f'Number of not fall labels: {sum(np.array(y_binary) == 0)}')
+ 
